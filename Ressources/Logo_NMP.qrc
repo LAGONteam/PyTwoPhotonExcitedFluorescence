@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="newPrefix">
+    <file>Logo NMP.png</file>
+  </qresource>
+</RCC>
