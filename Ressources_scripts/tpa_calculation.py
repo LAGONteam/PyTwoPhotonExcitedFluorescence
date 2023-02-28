@@ -126,7 +126,11 @@ class Read_Data_File():
         except KeyError:
 
             logging.error("Tpa_calc:Key Error. Please measure the reference before the sample !")
+            return -1, -1
 
+        except ZeroDivisionError:
+
+            logging.error("Tpa_calc:ZeroDivisionError. Cannot devide by zero !!")
             return -1, -1
         concentration = float(ref_concentration) / float(sample_concentration)
         refractive_index = sample_refractive_index / reference_refractive_index

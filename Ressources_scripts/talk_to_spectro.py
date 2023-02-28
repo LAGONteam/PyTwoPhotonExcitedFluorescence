@@ -78,7 +78,7 @@ class Maya():
 
             logging.info(f"Talk_Spectro:type(Data): {type(data)}.")
 
-        logging(f'Talk_Spectro:type(Dataread): {type(data)}.')
+        #logging(f'Talk_Spectro:type(Dataread): {type(data)}.')
 
         return wavelength, data, intensity
 

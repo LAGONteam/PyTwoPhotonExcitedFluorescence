@@ -16,7 +16,6 @@ logging.info("Main import => ok !")
 
 SIMULATION_FOR_DEBUG= False  #Set True only for code test and debug, for real measure set False
                             # do not forget to do the same for configmanagement in Ressources_scripts
-AUTO_REPAIR_ANGLE_POWER_DICT = False
 
 import json
 import os
@@ -48,11 +47,12 @@ if SIMULATION_FOR_DEBUG == False:
     from Ressources_scripts.coherent_laser import Chameleon as fs_laser
     from Ressources_scripts import talk_to_spectro
     from Ressources_scripts import talk_to_elliptec_devices as tuner
-    from Ressources_scripts import Photodiode
+    import nidaqmx
 else:
     from Ressources_scripts.Laser_Simulation import Chameleon as fs_laser
     from Ressources_scripts import Spectro_Simulation as talk_to_spectro
     from Ressources_scripts import Motor_Simulation as tuner
+    import Ressources_scripts.Photodiode_Simulation as nidaqmx
 
 from Ressources_scripts.configmanagement import sample_data, save, parrallel_execution, create_json, chrono, get_samples, \
     create_samples, get_path
@@ -63,24 +63,9 @@ from Ressources_scripts.Data_processing import save as sdp
 from Ressources_scripts import References_data
 from statistics import mean
 from pathlib import Path
-# from ThorlabsPM100 import ThorlabsPM100
-# import pyvisa
 
 if SIMULATION_FOR_DEBUG:
     logging.warning("PyTPEF executed in Simulation mode !")
-else:
-    # try :
-    #     rm = pyvisa.ResourceManager()
-    #     logging.info(f"List of available devices: {rm.list_resources()}.")
-    #     inst = rm.open_resource('USB0::0x1313::0x807A::M00795996::INSTR')
-    #     logging.info((f"Connected to device: {inst}."))
-    #     POWER_METER = ThorlabsPM100(inst=inst)
-    #     POWER_METER.sense.correction.collect.zero.initiate
-
-    if Photodiode.state():
-        logging.info("Connected to Power meter")
-    else:
-        logging.error("CANNOT CONNECT TO power meter !")
 
 ANGLE_POWER_DICT={}
 
@@ -186,7 +171,6 @@ class Measure(QObject):
         self.data_for_new_measure=data_for_new_measure
         self.current_emission_filter= current_emission_filter
         self.wavelength=wavelength
-        self.all_power_values_dict={}
         if opo_measure :
             self.real_wavelength=real_opo_wavelength
         else:
@@ -220,8 +204,6 @@ class Measure(QObject):
         save().fill_angle_power_dict_for_measure(data=ANGLE_POWER_DICT)
 
         logging.info("Fill_angle_power_dict_for_measure saved => ok !")
-
-        save().save_power_values(sample_name=self.sample, excitation_wavelength=self.real_wavelength, list_of_power_to_save=self.all_power_values_dict)
 
         self.measure_finished.emit(sample_info, experimental_data, processed_data, root_dict)
         self.signal_to_pop_up.emit()
@@ -267,125 +249,6 @@ class Measure(QObject):
 
 
         return list_of_angles, list_of_power, all_power_values
-
-    def check_real_power(self, angle, power_requested, wavelength):
-        """
-        This function check the real value of the power corresponding to the angle of the halfwave plate and
-        update the dictionary with the new value if necessary
-        :param angle: int
-        :param power_requested: float
-        :return: list
-        """
-        tuner.RotationMount().spin_to_position(position=angle)
-        sleep(0.1)
-        actual_power = Photodiode.read()
-        print("actual_power: ", actual_power)
-        print("angle: ", angle)
-        tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength, angle=angle,
-                                                                     power=actual_power)
-
-        if float(actual_power) < 0.0051:
-            up_accepted_value = 2
-            down_accepted_value = 0
-        if float(actual_power) < 0.0101:
-            up_accepted_value = 1.5
-            down_accepted_value = 0.5
-        elif float(actual_power) < 0.0301:
-            up_accepted_value = 1.2
-            down_accepted_value = 0.8
-        elif float(actual_power) < 0.501:
-            up_accepted_value = 1.1
-            down_accepted_value = 0.9
-        print("actual_power: ", actual_power, "\n", "up_accepted_value: ", up_accepted_value, "down_accepted_value: ", down_accepted_value)
-        if float(actual_power) <= float(power_requested)*up_accepted_value and float(actual_power) >= float(power_requested)*down_accepted_value:
-            data = [angle, actual_power]
-            print('Old and new data are ok !')
-            return data
-
-        else:
-            angle = 90
-            tuner.RotationMount().spin_to_position(position=angle)
-            sleep(0.1)
-            #POWER_METER.Connect()
-            tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength, angle=angle,
-                                                                         power=actual_power)
-            pitch_list = [10, 5, 1]
-            for n in pitch_list:
-                print(n)
-                if actual_power > (power_requested*1.1):
-                    new_max_data=self.theta(angle=angle, actual_power=actual_power, power_requested=power_requested, pitch=n, up=True, wavelength=wavelength)
-                    if type(new_max_data)==list:
-                        angle= new_max_data[0]
-                        actual_power=new_max_data[1]
-                        print("0")
-                        print("actual_power: ", actual_power)
-                        print("angle: ", angle)
-
-                    else:
-                        pass
-                if actual_power < (power_requested*0.9):
-                    new_min_data = self.theta(angle=angle, actual_power=actual_power, power_requested=power_requested,
-                                              pitch=n, up=False, wavelength=wavelength)
-                    if type(new_min_data)==list:
-                        angle= new_min_data[0]
-                        actual_power=new_min_data[1]
-                        print("1")
-                        print("actual_power: ", actual_power)
-                        print("angle: ", angle)
-
-                    else:
-                        data = [angle, actual_power]
-                        return data
-            #POWER_METER.Disconnect()
-            data = [angle, actual_power]
-            return data
-
-    def theta(self, angle, actual_power, power_requested, pitch, up, wavelength):
-        """
-        This function is used to determine quickly the closet angle to get the power requested
-        :param angle: int
-        :param actual_power:float
-        :param power_requested: float
-        :param pitch: int
-        :param up: bool
-        :return: bool or list
-        """
-        i=0
-        actual_angle=int(angle)
-        pitch=int(pitch)
-        if up :
-            while actual_power > power_requested and actual_angle>=pitch:
-                actual_angle = actual_angle-pitch
-                tuner.RotationMount().spin_to_position(position=actual_angle)
-                sleep(0.5)
-                actual_power = Photodiode.read()
-                i+=1
-                print("power_requested: ", power_requested)
-                print("actual_angle: ", actual_angle)
-                print("actual_power: ", actual_power)
-                print("i: ",i)
-                tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength,
-                                                                             angle=actual_angle, power=actual_power)
-                if i > 36:
-                    return False
-        else:
-            while actual_power < power_requested and actual_angle>=pitch:
-                actual_angle=actual_angle + pitch
-                tuner.RotationMount().spin_to_position(position=actual_angle)
-                sleep(0.5)
-                actual_power = Photodiode.read()
-                i+=1
-                print("power_requested: ", power_requested)
-                print("actual_angle: ", actual_angle)
-                print("actual_power: ", actual_power)
-                print("i: ",i)
-                tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength,
-                                                                             angle=actual_angle, power=actual_power)
-                if i > 36:
-                    return False
-        data = [actual_angle, actual_power]
-        print("data: ", data)
-        return data
 
     def measure_step_1(self, maximum_power_requested, minimum_power_requested, power_pitch, wavelength, sample,
                        integration_time, number_of_scans, new_measure):
@@ -433,7 +296,7 @@ class Measure(QObject):
                 list_of_angles.append(temp_angle)
                 all_power_values.update({f"{temp_angle}": f"{temp_power}"})
 
-                logging.info(f"New measure of #{i}, angle: {temp_angle}, power: {temp_power*1000} mW.")
+                logging.info(f"New measure of #{i}, angle: {temp_angle}, power: {temp_power}.")
 
                 self.progress_bar_status.emit(15)
         self.measure_step_2(sample=sample, integration_time=integration_time, number_of_scans=number_of_scans,
@@ -480,7 +343,6 @@ class Measure(QObject):
         sleep(0.1)
         x_dark, y_dark, power_dark, raw_fluo = parrallel_execution(integration_time=integration_time).run(
             scan=1, intensity_dark=0)
-        self.all_power_values_dict['dark'] = power_dark
 
         logging.info("Parrallel_execution done => ok !")
         logging.info(f"Dark measured. Power dark= {power_dark}.")
@@ -492,7 +354,7 @@ class Measure(QObject):
 
         logging.info(f"Mean power for dark= {power_dark_mean}.")
 
-        self.send_data_to_user.emit(f"The mean value of the dark is: {round(float(power_dark_mean*1000),1)} mW.")
+        self.send_data_to_user.emit(f"The mean value of the dark is: {round(float(power_dark_mean),6)}.")
         temporary_wavelength_list.append(x_dark)
         temporary_intensity_list.append(y_dark)
 
@@ -529,15 +391,6 @@ class Measure(QObject):
         n=1
 
         for angle in list_of_angles:
-
-            power_requested=all_power_values[angle]
-            print("power_requested: ", power_requested)
-            print("angle: ", angle)
-            if AUTO_REPAIR_ANGLE_POWER_DICT:
-                data=self.check_real_power(angle=angle, power_requested=power_requested, wavelength=wavelength)
-                all_power_values.update({f"{data[0]}": f"{data[1]}"})
-            print(all_power_values)
-
             temporary_intensity_list, temporary_wavelength_list, i, list_of_fully_corrected_area, list_of_square_dark_corr_power, full_corrected_area = self.measure_step_3(
                 wavelength=wavelength, sample=sample, i=i, angle=angle, all_power_values=all_power_values,
                 y_dark=y_dark, power_dark_mean=power_dark_mean,
@@ -683,18 +536,17 @@ class Measure(QObject):
 
         logging.info("Spin_to_position => ok !")
 
-        true_power = all_power_values[f"{angle}"]
-        true_power=float(true_power)
+        sleep(0.2)
+        true_power = all_power_values[angle]
 
         logging.info(f"Going to angle= {angle} °.")
-        logging.info(f"Real power= {float(true_power)*1000} mW.")
+        logging.info(f"Real power= {true_power} mW.")
         logging.info(f"Current wavelength= {wavelength} nm.")
 
-        self.send_data_to_user.emit(f"Rotation ok !\nPower is {round(float(true_power)*1000,1)} mW and wavelength is {wavelength} nm.")
+        self.send_data_to_user.emit(f"Rotation ok !\nPower is {true_power} mW and wavelength is {wavelength} nm.")
         """Record the corrected fluorescence & power."""
         spectro_wavelength, spectro_intensity, photodiode_power, raw_fluorescence = parrallel_execution(
             integration_time).run(scan=number_of_scans, intensity_dark=y_dark)
-        self.all_power_values_dict[f"{angle}"] = photodiode_power
 
         logging.info("Parrallel_execution => ok !")
 
@@ -706,9 +558,9 @@ class Measure(QObject):
 
             logging.error(f"Can't calculate mean({photodiode_power}), photodiode_power_mean is set to 1.")
 
-        logging.info(f"Measurement of {sample} at angle position {angle} ({true_power*1000} mW) done.")
+        logging.info(f"Measurement of {sample} at angle position {angle} ({true_power} mW) done.")
 
-        self.send_data_to_user.emit(f"Measurement of {sample} at angle position {angle} ({round(float(true_power*1000), 1)} mW) done.\nCalculating and storing dark corrected intensity and power values.")
+        self.send_data_to_user.emit(f"Measurement of {sample} at angle position {angle} ({round(float(true_power), 5)} mW) done.\nCalculating and storing dark corrected intensity and power values.")
         """Calculate and store dark corrected intensity and power values"""
         intensity_dark_corr = spectro_intensity
 
@@ -755,7 +607,7 @@ class Measure(QObject):
 
         try:
             fp=full_corrected_area/square_power_dark_corr
-            self.send_data_to_user.emit(f"P² = {round(square_power_dark_corr,2)} mW². \nF = {round(full_corrected_area,1)} cps. \nF/P² = {round(fp,1)} cps/mW².")
+            self.send_data_to_user.emit(f"P² = {round(square_power_dark_corr,1)}. \nF = {round(full_corrected_area,1)}. \nF/P² = {round(fp,1)}.")
 
             logging.info(f'F/P² = {fp}.')
 
@@ -815,9 +667,9 @@ class Measure(QObject):
                  }
             )
 
-        logging.info(f"self.experimental for {sample} at {wavelength} and {true_power*1000} mW updated.")
+        logging.info(f"self.experimental for {sample} at {wavelength} and {true_power} mW updated.")
 
-        self.send_data_to_user.emit(f"Experimental data of {sample} at {wavelength} nm and {round(float(true_power*1000),1)} updated.")
+        self.send_data_to_user.emit(f"Experimental data of {sample} at {wavelength} nm and {round(float(true_power),5)} updated.")
         list_of_fully_corrected_area.append(full_corrected_area)
         list_of_square_dark_corr_power.append(square_power_dark_corr)
 
@@ -1162,6 +1014,19 @@ class MyApp(QWidget):
 
         logging.info("Spectre & Power plotwidgets updated => ok !")
 
+    def close_photodiode(self):
+        """
+        Close the photodiode
+        """
+        if SIMULATION_FOR_DEBUG == False:
+            with nidaqmx.Task() as task:
+                task.ai_channels.add_ai_voltage_chan("Dev1/ai1")
+                task.close()
+        else:
+            print("Close")
+
+        logging.info("Photodiode closed.")
+
     def get_ccd_corr_dye(self):
         """
         Collect and return data about the dye used for CCD correction
@@ -1246,15 +1111,26 @@ class MyApp(QWidget):
         """
         self.power_int = y #np.mean(y)
         self.lcd_power.display(self.power_int * 1000)
-
     def read_photodiode(self):
         """
         Read and return data from the photodiode
         :return: float
         """
         if SIMULATION_FOR_DEBUG == False:
-            data = Photodiode.read()
-            print(data)
+            with nidaqmx.Task() as task:
+                task.ai_channels.add_ai_voltage_chan("Dev1/ai1", max_val=5, min_val=-5)
+                #data = task.read()
+                in_stream = task.in_stream
+
+                data = in_stream.read(number_of_samples_per_channel=self.integration_time_value)
+                print('1 Channel N Samples Read: ')
+                #data = task.read(number_of_samples_per_channel=10)
+                print(len(data), type(data))
+                print(data)
+                data=np.mean(data)
+                print(data)
+
+
         else:
             data = np.random.randint(10)
         return data
@@ -1411,6 +1287,7 @@ class MyApp(QWidget):
             self.progressbar_calibration.setValue(100)
             self.btn_experiment_status.setText("Safe")
             self.btn_experiment_status.setStyleSheet("background-color:green")
+            #self.close_photodiode() #remove if issues
             return True
     def run_loop_spectro(self):
         """
@@ -1489,7 +1366,7 @@ class MyApp(QWidget):
         self.list_measuring_time.clear()
         self.btn_experiment_status.setText("Safe")
         self.btn_experiment_status.setStyleSheet("background-color:green")
-
+        #self.close_photodiode()
     def super_fast(self):
         """
         Turns self.faster to True to set integration time to 30 ms.
@@ -2515,13 +2392,10 @@ class MyApp(QWidget):
         :param sample: str
         :param wavelength: int
         """
-        try:
-            sdp().figure_quadraticity(x1=square_power, y1=fluo, x2=square_power, y2=fit,
-                                       sample=sample, wavelength=wavelength, root=self.folder_root)
+        sdp().figure_quadraticity(x1=square_power, y1=fluo, x2=square_power, y2=fit,
+                                   sample=sample, wavelength=wavelength, root=self.folder_root)
 
-            logging.info("save_plot_from_signal => ok !")
-        except:
-            logging.warning("save_plot_from_signal => failed !")
+        logging.info("save_plot_from_signal => ok !")
 
     def select_sample(self):
         """
@@ -2742,6 +2616,10 @@ class MyApp(QWidget):
         y=np.array(y_temp)
         return x_sort, y
 
+
+
+
+
     def tpef_calculation_for_single_measure(self, sample, wavelength, simulation):
         """
         Caclulate the Sigma 2 value of the sample at selected wavelength
@@ -2824,7 +2702,6 @@ class MyApp(QWidget):
                 x.append(wavelength)
                 y.append(data_for_sigma_2[f"{wavelength}"]["S2F"])
             sdp().figure(x=x, y=y, name=f"TPEF spectra of {sample}", sample=sample, root= self.folder_root)
-
     def update_dictionary_processed_data(self, sample, wavelength, slope, coeff, log_square_fluo, log_square_power, fit,
                                          full_corrected_area, sigma2_phi, sigma2, list_of_fl, list_of_pp):
         """
@@ -2865,6 +2742,7 @@ class MyApp(QWidget):
         })
 
         logging.info("Processed data dictionary Updated.")
+
 
 
     """
@@ -2969,11 +2847,9 @@ if __name__ == "__main__":
 
     myApp = MyApp()
     myApp.show()
-    #sys.exit(app.exec())
+    sys.exit(app.exec())
 
     try:
         sys.exit(app.exec())
     except SystemExit:
-        a=Photodiode.close()
-        print(a)
         print('Closing Windows')

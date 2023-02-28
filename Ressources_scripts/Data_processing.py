@@ -343,27 +343,33 @@ class save:
 
         return True
 
-    def update_samples_informations(self, original_data, new_data, type_of_data):
-        """
-        Unused function
-        """
+    def update_samples_informations(self, original_data, new_data, type_of_data, sample, root, new_data_name=None):
         """
         This function is not ready yet, it will be used to allow user to change some parameters data after measurement.
         """
 
         logging.info("Data_proc:Starting update_samples_informations.")
         logging.info(f"Data_proc:original_data: {original_data}.")
-        logging.info(f"Data_proc:type(new_data): {type(new_data)}.")
+        logging.info(f"Data_proc:new_data: {new_data}.")
         logging.info(f"Data_proc:type_of_data: {type_of_data}.")
+        logging.info(f"Data_proc:sample: {sample}.")
 
-        if type_of_data == "Concentration":
-            logging.info("Concentration")
-        elif type_of_data =="Phi":
-            logging.info("Phi")
-        elif type_of_data =="Solvent":
-            logging.info("Solvent")
-        elif type_of_data == "Emission spectrum":
-            logging.info("Emission spectrum")
+        data = self.read_samples_informations(root=root)
+
+        logging.info(f"Data_proc:data before update: {data}.")
+
+        for key in data.keys():
+            if key == str(sample):
+                for key_ in data[f"{sample}"].keys():
+                    if key_ == type_of_data:
+                        if new_data_name != None:
+                            data[f"{sample}"][f"{key_}"]={new_data_name:new_data}
+                        else:
+                            data[f"{sample}"][f"{key_}"]=new_data
+
+        logging.info(f"Data_proc:data after update: {data}.")
+
+        self.change_samples_informations(root=root, new_data=data)
 
         logging.info("Data_proc:update_samples_informations => ok !")
 
@@ -1041,7 +1047,7 @@ class save:
         logging.info(f"Data_proc:wavelength: {wavelength}.")
         logging.info(f"Data_proc:root: {root}.")
 
-        dictionary_color = {"0": "C0", "1": "C1", "2": "C2", "3": "C3", "4": "C4", "5": "C5", "6": "C6", "7": "C7", "8": "C8", "9": "C9", }
+        dictionary_color = {"0": "C0", "1": "C1", "2": "C2", "3": "C3", "4": "C4", "5": "C5", "6": "C6", "7": "C7", "8": "C8", "9": "C9"}
         fig, ax = plt.subplots()
         for measure in range(number_of_measure+1):
             if measure !=0:

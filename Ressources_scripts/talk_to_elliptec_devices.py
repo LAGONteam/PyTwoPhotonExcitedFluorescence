@@ -5,12 +5,15 @@ Created on 5/1/2023
 import time
 import numpy as np
 import elliptec
-from Ressources_scripts import PMA100
+#from Ressources_scripts import PMA100
 import os
 from pathlib import Path
 import json
-from coherent_laser import Chameleon
+#from coherent_laser import Chameleon
+from Ressources_scripts.coherent_laser import Chameleon
 import logging
+from Ressources_scripts import Photodiode
+#import Photodiode
 
 logging.basicConfig(level=logging.INFO,
                     filename="PyTPEF.log",
@@ -26,15 +29,28 @@ root = root / "Ressources" / "dict_power_angle_conversion.json"
 CONTROLLER= elliptec.Controller('COM4')
 ROTATION= elliptec.Rotator(CONTROLLER)
 ROTATION.home()
-POWER_METER= PMA100.PMA100()
-POWER_METER.Connect()
+
+
+
+# from ThorlabsPM100 import ThorlabsPM100
+# import pyvisa
+#
+# rm = pyvisa.ResourceManager()
+# inst = rm.open_resource('USB0::0x1313::0x807A::M00795996::INSTR')
+# power_meter_USB=ThorlabsPM100(inst=inst)
+# power_meter_USB.configure.scalar.power
+# power_meter_USB.sense.correction.collect.zero.initiate
+
+
+
+#POWER_METER= PMA100.PMA100()
+#POWER_METER.Connect()
 
 
 class power_angle_conversion:
 
     def __init__(self):
         self.dict_power_angle_conversion = {}
-        self.p = POWER_METER
 
         logging.info("Talk_elliptec:Initialisation of power_angle_conversion => ok !")
 
@@ -59,8 +75,8 @@ class power_angle_conversion:
 
                 logging.info(f"Talk_elliptec:The real angle is: {RotationMount().get_angle()}.")
 
-                power = RotationMount().read_power_meter() * 1000
-                power = round(power, 2)
+                # power = power_meter_USB.read
+                power  = Photodiode.read()
 
                 logging.info(f"Talk_elliptec:The corresponding power is {power} mW.")
 
@@ -76,10 +92,9 @@ class power_angle_conversion:
 
         logging.info("Talk_elliptec:Starting measure_power_angle_conversion.")
 
-        self.p.Set_Zero()
-        time.sleep(5)
-
-        for wavelength in range(680, 1080, 1):
+        for wavelength in range(680, 1081, 1):
+            # power_meter_USB.sense.correction.wavelength=int(wavelength)
+            Photodiode.set_wavelength(wavelength)
 
             logging.info(f"Talk_elliptec:The wavelength is {wavelength} nm.")
 
@@ -124,6 +139,30 @@ class power_angle_conversion:
 
         return data
 
+    def update_power_angle_conversion(self, wavelength, angle, power):
+
+        logging.info("Talk_elliptec:Starting update_power_angle_conversion.")
+        logging.info(f"Talk_elliptec:wavelength: {wavelength}.")
+        logging.info(f"Talk_elliptec:angle: {angle}.")
+        logging.info(f"Talk_elliptec:power: {power}.")
+
+
+        with open(root, 'r') as f:
+             dict = json.load(f)
+        try:
+            print(f"Check old entry dict[{wavelength}][{angle}]: ", dict[f"{wavelength}"][f"{angle}"])
+        except KeyError:
+            print("The angle is created")
+
+        dict[f"{wavelength}"].update({f"{angle}": power})
+
+
+        print(f"Check new entry dict[{wavelength}][{angle}]: ", dict[f"{wavelength}"][f"{angle}"])
+        with open(root, "w") as w:
+            json.dump(dict, w)
+
+
+
 class RotationMount:
 
     """Initialization of the Rotation Mount"""
@@ -145,7 +184,7 @@ class RotationMount:
         self.min = False
         self.max = False
         self.dict_power_angle_conversion = {}
-        self.p = POWER_METER
+        #self.p = POWER_METER
         #self.p.Connect()
 
         logging.info("Talk_elliptec:Initialisation of RotationMount => ok !")
@@ -196,8 +235,8 @@ class RotationMount:
         logging.info(f"Talk_elliptec:number_of_measure: {number_of_measure}.")
         logging.info(f"Talk_elliptec:wavelength: {wavelength}.")
 
-        self.power_max = float(power_max)
-        self.power_min = float(power_min)
+        self.power_max = float(power_max/1000)
+        self.power_min = float(power_min/1000)
         self.number_of_measure = number_of_measure
 
         logging.info("Talk_elliptec:Start Angle for power ")

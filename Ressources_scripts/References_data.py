@@ -2612,6 +2612,5 @@ REF_FLUORESCEIN_WATER_S2F={"670": 23.4, "671": 22.59, "672": 21.78, "673": 20.97
 #TODO: Add more references
 
 def ccd_corr_dye():
-    print("Loading REF_CCD_CORR data .....")
     return REF_CCD_CORR
 

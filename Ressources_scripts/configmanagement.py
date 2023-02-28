@@ -2,15 +2,17 @@
 Created on 5/1/2023
 @author: Jonathan DANIEL, jonathan.daniel@u-bordeaux.fr
 """
-SIMULATION_FOR_DEBUG= True  #Set True only for code test and debug, for real measure set False
+SIMULATION_FOR_DEBUG= False  #Set True only for code test and debug, for real measure set False
                             # do not forget to do the same for PyTPEF
 
-if SIMULATION_FOR_DEBUG:
+if SIMULATION_FOR_DEBUG== True:
     import Ressources_scripts.Spectro_Simulation as talk_to_spectro
-    import Ressources_scripts.Photodiode_Simulation as nidaqmx
+    #import Ressources_scripts.Photodiode_Simulation as nidaqmx
 else:
-    import Ressources_scripts.talk_to_spectro
-    import nidaqmx
+    import Ressources_scripts.talk_to_spectro as talk_to_spectro
+    #import nidaqmx
+    #from Ressources_scripts import PMA100
+    import Ressources_scripts.Photodiode as Photodiode
 
 
 import copy
@@ -223,6 +225,13 @@ class parrallel_execution:
 
     def __init__(self, integration_time):
 
+        # try:
+        #     # self.power_meter = PMA100.PMA100()
+        #     # self.power_meter.Connect()
+        #     # logging.info("Connected to PMA100")
+        # except:
+        #     logging.error("CANNOT CONNECT TO PMA100 DEVICE !")
+
         logging.info(f"Config:parrallel_execution:integration_time: {integration_time}.")
 
         self.integration_time = integration_time
@@ -258,11 +267,17 @@ class parrallel_execution:
                 data=np.random.randint(1,10)
                 self.power_data.append(data)
             else:
-                with nidaqmx.Task() as task:
+                # time, data = self.power_meter.Read_Power()
+                data = Photodiode.read()*1000 # W to mW
+                """with nidaqmx.Task() as task:
                     task.ai_channels.add_ai_voltage_chan("Dev1/ai1")
                     data_power = task.read()
                     self.power_data.append(data_power)
-                task.close()
+                task.close()"""
+                if str(data) == "-inf" or str(data) == "inf":
+                    pass
+                else:
+                    self.power_data.append(data)
 
         logging.info("Config:Power measure ended.")
         logging.info("Config:parrallel_execution:_photodiode => ok !")
@@ -292,7 +307,7 @@ class parrallel_execution:
         self.parallel_run()
 
         logging.info("Config:parrallel_execution:run => ok !")
-
+        # self.power_meter.Disconnect()
         return self.wavelength, self.spectrum, self.power_data, self.raw_fluorescence
 
 class sample_data:
@@ -876,6 +891,36 @@ class save:
         logging.info("Config:save:read_json_data => ok !")
 
         return data
+
+    def save_power_values(self, sample_name, excitation_wavelength, list_of_power_to_save):
+        """
+        This function saves exclusively all the power values of the sample at specific wavelength in a .txt file
+        :param sample_name: str
+        :param excitation_wavelength: int
+        :param list_of_power_to_save: dict
+        """
+
+        file = self.root / f"{sample_name}" / f"{excitation_wavelength}_power_values.txt"
+        file.touch()
+        i=0
+        head = "# \t"
+        for key in list_of_power_to_save:
+            head = head + f" \t {key}"
+        head = head + "\n"
+        with open(file, "w") as w:
+            w.write(head)
+        for n in list_of_power_to_save['dark']:
+            try:
+                data =f"{i} \t"
+                for key in list_of_power_to_save:
+                    value = list_of_power_to_save[f"{key}"][i]
+                    data = data + f" \t {value}"
+                data = data + "\n"
+                with open(file, "a") as a:
+                    a.write(data)
+                i+=1
+            except:
+                pass
 
     def save_sample(self, sample_name, emission_wavelength, emission_intensity, concentration, solvent, phi):
         """

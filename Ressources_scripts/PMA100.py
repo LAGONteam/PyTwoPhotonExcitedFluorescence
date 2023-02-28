@@ -18,7 +18,7 @@ class PMA100():
         self.powermeter = ThorlabsPM100x()
         #available_wavelength=(185, 500, 860, 900, 980, 1050, 1100, 1310, 1550)#Only for S310C thermal detector
         self.available_devices = self.powermeter.list_devices() #Check which devices are available
-        #print("Devices detected : ", self.available_devices)
+        print("Devices detected : ", self.available_devices)
         self.i = 0
         self.x= []
         self.y = []
@@ -32,9 +32,9 @@ class PMA100():
         """
         try :
             self.powermeter.connect_device(device_addr = self.available_devices[0][0]) #Connect to the first available device
-            #print(f"Successful connection to {self.available_devices[0][0]}")
+            print(f"Successful connection to {self.available_devices[0][0]}")
             (maxWL, minWL) = self.powermeter.read_min_max_wavelength()  # read max and min available wavelengths
-            #print(f"The sensing range of the connected sensor is [{minWL} nm; {maxWL} nm].")
+            print(f"The sensing range of the connected sensor is [{minWL} nm; {maxWL} nm].")
         except:
 
             logging.error("PMA100:No device found !")
@@ -101,8 +101,8 @@ class PMA100():
         logging.info(f"PMA100:x= {self.i}.")
 
         self.x=self.i
-        self.y= self.powermeter.power[0]
-
+        self.y= (self.powermeter.power[0])*10*1000 #because the bs is 80/20, *1000 is to set W to mW
+        self.y=round(self.y, 1)
         logging.info(f"PMA100:y= {self.y}.")
 
         return self.x, self.y
