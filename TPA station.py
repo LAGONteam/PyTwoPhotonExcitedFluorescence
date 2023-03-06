@@ -1,4 +1,5 @@
 import sys
+import time
 from time import sleep
 import matplotlib
 import matplotlib.pyplot as plt
@@ -23,6 +24,7 @@ from Ressources_scripts.Data_processing import get_all_samples, save, get_sample
 from pathlib import Path
 
 
+
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None):
         fig = Figure()
@@ -38,6 +40,7 @@ class MyApp(QWidget):
         self.setWindowTitle('TPA station')
         self.processed_data = {}
         self.label_Logo_NMP.setPixmap(QPixmap("Logo NMP.png"))
+        self.data_changed = False
 
         """
         This app contains:
@@ -197,7 +200,7 @@ class MyApp(QWidget):
         dlg.exec()
 
         new_data=0#temporaire à enlever
-
+        self.data_changed = True
         if dlg.clickedButton() == buttonoptionA:
             """
             dans la boite d'affichage, rajouter un labl pour isncrire la nouvelle valeur ou un serach folder pour le spectre d'émission.
@@ -271,9 +274,7 @@ class MyApp(QWidget):
             """
 
         self.show_data_of_sample(simulation=False)
-
         logging.info("Main:change_sample_data => ok !")
-
 
     def read_data_from_folder(self):
         """
@@ -349,7 +350,7 @@ class MyApp(QWidget):
 
     def get_files(self):
         """
-        This function store in variable experimental datas (wavelength, power pitch.
+        This function store in variable experimental datas (wavelength, power pitch).
         :return: None
         """
 
@@ -365,6 +366,7 @@ class MyApp(QWidget):
 
         self.list_of_sample_data ={}
         self.list_of_wavelength=[]
+        print(samples)
         self.list_of_sample_data[samples[0]] = save().read_process(samples[0], simulation=False, root=self.folder_root)
         for wave in self.list_of_sample_data[samples[0]]:
             self.list_of_wavelength.append(int(wave))
@@ -416,7 +418,6 @@ class MyApp(QWidget):
 
         self.tpef_calculation_for_single_measure(sample=sample, wavelength=wavelength, simulation=True)
         self.plot_s2_from_signal(simulation=True)
-
         logging.info("Main:simulation => ok !")
 
     def graph_data(self, x, y,x2, y2, view, value, order_process, x_log, y_log, x_log2, y_log2):
@@ -483,15 +484,29 @@ class MyApp(QWidget):
 
         logging.info("Main:Starting:refresh_data.")
 
+        for selected_sample in self.ls_list_of_all_samples.selectedItems():
+            sample = selected_sample.data(0x0100)
+        try:
+
+            for wavelength in self.list_of_wavelength:
+                self.tpef_calculation_for_single_measure(sample=sample, wavelength=wavelength, simulation=False)
+            print("TPEF ok !")
+            self.plot_s2_from_signal(simulation=False)
+            logging.info(f"Main:refresh_data: sample: {sample}.")
+            logging.info("Main:refresh_data => ok !")
+
+        except:
+
+            logging.warning(f"Main:refresh_data: cannot refresh S2.")
+
         self.ls_list_of_all_samples.clear()
         samples = get_samples(self.sample_root)
         for sample in samples:
             lw_item = QListWidgetItem(sample.sample_name)
             lw_item.setData(0x0100, sample)  # 0x0100 => QtCore.Qt.UserRole
             self.ls_list_of_all_samples.addItem(lw_item)
-
-            logging.info(f"Main:refresh_data: sample: {sample}.")
-            logging.info("Main:refresh_data => ok !")
+        logging.info(f"Main:refresh_data: sample: {sample}.")
+        logging.info("Main:refresh_data => ok !")
 
     def refresh_wavelength(self, list_of_wavelength):
         """
@@ -550,7 +565,14 @@ class MyApp(QWidget):
         :param simulation: bool
         :return: None
         """
-
+        print(self.data_changed)
+        if self.data_changed == True:
+            dlg = QMessageBox(self)
+            dlg.setWindowTitle(f"Warning !")
+            dlg.setText(f"Please restart PyStation if you changed sample information \n (Phi, emission, concentration, solvent).")
+            dlg.exec()
+            if QMessageBox.StandardButton.Ok:
+                return
         logging.info("Main:Starting:plot_s2_from_signal.")
 
         self.S2Spectrum.clear()
@@ -560,7 +582,11 @@ class MyApp(QWidget):
         sigma_2= []
         tpef_wavelength= []
         for wavelength in data:
-            sigma_2.append(int(data[f"{wavelength}"]["S2"]))
+            if str(data[f"{wavelength}"]["S2"]) == "inf" or str(data[f"{wavelength}"]["S2"]) == "nan":
+                sigma_2.append(0)
+                logging.warning(f"Main:plot_s2_from_signal:type(sigma_2): 0, original value is infinity or NaN!")
+            else:
+                sigma_2.append(int(data[f"{wavelength}"]["S2"]))
 
             logging.info(f"Main:plot_s2_from_signal:type(sigma_2): {type(sigma_2)}.")
 
@@ -649,7 +675,6 @@ class MyApp(QWidget):
 
         logging.info("Main:clear_plot_from_signal => ok !")
 
-
     def plot_from_signal(self, x, y, square_power_dark_corr, full_corrected_area, i, power):
         """
         This function plots data on FluoIntensitySpectrum only.
@@ -711,7 +736,6 @@ class MyApp(QWidget):
 
             logging.warning("Main:save_plot_from_signal: Error !")
 
-
     def sort_wavelength(self, x, y):
         """
         Sort the data for to get a cleaner plot
@@ -743,8 +767,6 @@ class MyApp(QWidget):
             logging.warning("Main:sort_wavelengt => Error !")
 
             return x, y
-
-
 
     def update_dictionary_processed_data(self, sample, wavelength, slope, coeff, log_square_fluo, log_square_power, fit,
                                          full_corrected_area, sigma2_phi, sigma2, list_of_fl, list_of_pp):
