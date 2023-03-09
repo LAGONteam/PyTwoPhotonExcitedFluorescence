@@ -16,8 +16,11 @@ logging.info("Main import => ok !")
 
 SIMULATION_FOR_DEBUG= False  #Set True only for code test and debug, for real measure set False
                             # do not forget to do the same for configmanagement in Ressources_scripts
+AUTO_REPAIR_ANGLE_POWER_DICT = False
 
 import json
+
+
 import os
 import sys
 
@@ -47,12 +50,11 @@ if SIMULATION_FOR_DEBUG == False:
     from Ressources_scripts.coherent_laser import Chameleon as fs_laser
     from Ressources_scripts import talk_to_spectro
     from Ressources_scripts import talk_to_elliptec_devices as tuner
-    import nidaqmx
+    from Ressources_scripts import Photodiode
 else:
     from Ressources_scripts.Laser_Simulation import Chameleon as fs_laser
     from Ressources_scripts import Spectro_Simulation as talk_to_spectro
     from Ressources_scripts import Motor_Simulation as tuner
-    import Ressources_scripts.Photodiode_Simulation as nidaqmx
 
 from Ressources_scripts.configmanagement import sample_data, save, parrallel_execution, create_json, chrono, get_samples, \
     create_samples, get_path
@@ -63,9 +65,24 @@ from Ressources_scripts.Data_processing import save as sdp
 from Ressources_scripts import References_data
 from statistics import mean
 from pathlib import Path
+# from ThorlabsPM100 import ThorlabsPM100
+# import pyvisa
 
 if SIMULATION_FOR_DEBUG:
     logging.warning("PyTPEF executed in Simulation mode !")
+else:
+    # try :
+    #     rm = pyvisa.ResourceManager()
+    #     logging.info(f"List of available devices: {rm.list_resources()}.")
+    #     inst = rm.open_resource('USB0::0x1313::0x807A::M00795996::INSTR')
+    #     logging.info((f"Connected to device: {inst}."))
+    #     POWER_METER = ThorlabsPM100(inst=inst)
+    #     POWER_METER.sense.correction.collect.zero.initiate
+
+    if Photodiode.state():
+        logging.info("Connected to Power meter")
+    else:
+        logging.error("CANNOT CONNECT TO power meter !")
 
 ANGLE_POWER_DICT={}
 
@@ -171,6 +188,7 @@ class Measure(QObject):
         self.data_for_new_measure=data_for_new_measure
         self.current_emission_filter= current_emission_filter
         self.wavelength=wavelength
+        self.all_power_values_dict={}
         if opo_measure :
             self.real_wavelength=real_opo_wavelength
         else:
@@ -204,6 +222,8 @@ class Measure(QObject):
         save().fill_angle_power_dict_for_measure(data=ANGLE_POWER_DICT)
 
         logging.info("Fill_angle_power_dict_for_measure saved => ok !")
+
+        save().save_power_values(sample_name=self.sample, excitation_wavelength=self.real_wavelength, list_of_power_to_save=self.all_power_values_dict)
 
         self.measure_finished.emit(sample_info, experimental_data, processed_data, root_dict)
         self.signal_to_pop_up.emit()
@@ -249,6 +269,125 @@ class Measure(QObject):
 
 
         return list_of_angles, list_of_power, all_power_values
+
+    def check_real_power(self, angle, power_requested, wavelength):
+        """
+        This function check the real value of the power corresponding to the angle of the halfwave plate and
+        update the dictionary with the new value if necessary
+        :param angle: int
+        :param power_requested: float
+        :return: list
+        """
+        tuner.RotationMount().spin_to_position(position=angle)
+        sleep(0.1)
+        actual_power = Photodiode.read()
+        print("actual_power: ", actual_power)
+        print("angle: ", angle)
+        tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength, angle=angle,
+                                                                     power=actual_power)
+
+        if float(actual_power) < 0.0051:
+            up_accepted_value = 2
+            down_accepted_value = 0
+        if float(actual_power) < 0.0101:
+            up_accepted_value = 1.5
+            down_accepted_value = 0.5
+        elif float(actual_power) < 0.0301:
+            up_accepted_value = 1.2
+            down_accepted_value = 0.8
+        elif float(actual_power) < 0.501:
+            up_accepted_value = 1.1
+            down_accepted_value = 0.9
+        print("actual_power: ", actual_power, "\n", "up_accepted_value: ", up_accepted_value, "down_accepted_value: ", down_accepted_value)
+        if float(actual_power) <= float(power_requested)*up_accepted_value and float(actual_power) >= float(power_requested)*down_accepted_value:
+            data = [angle, actual_power]
+            print('Old and new data are ok !')
+            return data
+
+        else:
+            angle = 90
+            tuner.RotationMount().spin_to_position(position=angle)
+            sleep(0.1)
+            #POWER_METER.Connect()
+            tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength, angle=angle,
+                                                                         power=actual_power)
+            pitch_list = [10, 5, 1]
+            for n in pitch_list:
+                print(n)
+                if actual_power > (power_requested*1.1):
+                    new_max_data=self.theta(angle=angle, actual_power=actual_power, power_requested=power_requested, pitch=n, up=True, wavelength=wavelength)
+                    if type(new_max_data)==list:
+                        angle= new_max_data[0]
+                        actual_power=new_max_data[1]
+                        print("0")
+                        print("actual_power: ", actual_power)
+                        print("angle: ", angle)
+
+                    else:
+                        pass
+                if actual_power < (power_requested*0.9):
+                    new_min_data = self.theta(angle=angle, actual_power=actual_power, power_requested=power_requested,
+                                              pitch=n, up=False, wavelength=wavelength)
+                    if type(new_min_data)==list:
+                        angle= new_min_data[0]
+                        actual_power=new_min_data[1]
+                        print("1")
+                        print("actual_power: ", actual_power)
+                        print("angle: ", angle)
+
+                    else:
+                        data = [angle, actual_power]
+                        return data
+            #POWER_METER.Disconnect()
+            data = [angle, actual_power]
+            return data
+
+    def theta(self, angle, actual_power, power_requested, pitch, up, wavelength):
+        """
+        This function is used to determine quickly the closet angle to get the power requested
+        :param angle: int
+        :param actual_power:float
+        :param power_requested: float
+        :param pitch: int
+        :param up: bool
+        :return: bool or list
+        """
+        i=0
+        actual_angle=int(angle)
+        pitch=int(pitch)
+        if up :
+            while actual_power > power_requested and actual_angle>=pitch:
+                actual_angle = actual_angle-pitch
+                tuner.RotationMount().spin_to_position(position=actual_angle)
+                sleep(0.5)
+                actual_power = Photodiode.read()
+                i+=1
+                print("power_requested: ", power_requested)
+                print("actual_angle: ", actual_angle)
+                print("actual_power: ", actual_power)
+                print("i: ",i)
+                tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength,
+                                                                             angle=actual_angle, power=actual_power)
+                if i > 36:
+                    return False
+        else:
+            while actual_power < power_requested and actual_angle>=pitch:
+                actual_angle=actual_angle + pitch
+                tuner.RotationMount().spin_to_position(position=actual_angle)
+                sleep(0.5)
+                actual_power = Photodiode.read()
+                i+=1
+                print("power_requested: ", power_requested)
+                print("actual_angle: ", actual_angle)
+                print("actual_power: ", actual_power)
+                print("i: ",i)
+                tuner.power_angle_conversion().update_power_angle_conversion(wavelength=wavelength,
+                                                                             angle=actual_angle, power=actual_power)
+                if i > 36:
+                    return False
+        data = [actual_angle, actual_power]
+        print("data: ", data)
+        return data
 
     def measure_step_1(self, maximum_power_requested, minimum_power_requested, power_pitch, wavelength, sample,
                        integration_time, number_of_scans, new_measure):
@@ -296,7 +435,7 @@ class Measure(QObject):
                 list_of_angles.append(temp_angle)
                 all_power_values.update({f"{temp_angle}": f"{temp_power}"})
 
-                logging.info(f"New measure of #{i}, angle: {temp_angle}, power: {temp_power}.")
+                logging.info(f"New measure of #{i}, angle: {temp_angle}, power: {temp_power*1000} mW.")
 
                 self.progress_bar_status.emit(15)
         self.measure_step_2(sample=sample, integration_time=integration_time, number_of_scans=number_of_scans,
@@ -343,6 +482,7 @@ class Measure(QObject):
         sleep(0.1)
         x_dark, y_dark, power_dark, raw_fluo = parrallel_execution(integration_time=integration_time).run(
             scan=1, intensity_dark=0)
+        self.all_power_values_dict['dark'] = power_dark
 
         logging.info("Parrallel_execution done => ok !")
         logging.info(f"Dark measured. Power dark= {power_dark}.")
@@ -354,7 +494,7 @@ class Measure(QObject):
 
         logging.info(f"Mean power for dark= {power_dark_mean}.")
 
-        self.send_data_to_user.emit(f"The mean value of the dark is: {round(float(power_dark_mean),6)}.")
+        self.send_data_to_user.emit(f"The mean value of the dark is: {round(float(power_dark_mean*1000),1)} mW.")
         temporary_wavelength_list.append(x_dark)
         temporary_intensity_list.append(y_dark)
 
@@ -391,6 +531,15 @@ class Measure(QObject):
         n=1
 
         for angle in list_of_angles:
+
+            power_requested=all_power_values[angle]
+            print("power_requested: ", power_requested)
+            print("angle: ", angle)
+            if AUTO_REPAIR_ANGLE_POWER_DICT:
+                data=self.check_real_power(angle=angle, power_requested=power_requested, wavelength=wavelength)
+                all_power_values.update({f"{data[0]}": f"{data[1]}"})
+            print(all_power_values)
+
             temporary_intensity_list, temporary_wavelength_list, i, list_of_fully_corrected_area, list_of_square_dark_corr_power, full_corrected_area = self.measure_step_3(
                 wavelength=wavelength, sample=sample, i=i, angle=angle, all_power_values=all_power_values,
                 y_dark=y_dark, power_dark_mean=power_dark_mean,
@@ -536,17 +685,18 @@ class Measure(QObject):
 
         logging.info("Spin_to_position => ok !")
 
-        sleep(0.2)
-        true_power = all_power_values[angle]
+        true_power = all_power_values[f"{angle}"]
+        true_power=float(true_power)
 
         logging.info(f"Going to angle= {angle} °.")
-        logging.info(f"Real power= {true_power} mW.")
+        logging.info(f"Real power= {float(true_power)*1000} mW.")
         logging.info(f"Current wavelength= {wavelength} nm.")
 
-        self.send_data_to_user.emit(f"Rotation ok !\nPower is {true_power} mW and wavelength is {wavelength} nm.")
+        self.send_data_to_user.emit(f"Rotation ok !\nPower is {round(float(true_power)*1000,1)} mW and wavelength is {wavelength} nm.")
         """Record the corrected fluorescence & power."""
         spectro_wavelength, spectro_intensity, photodiode_power, raw_fluorescence = parrallel_execution(
             integration_time).run(scan=number_of_scans, intensity_dark=y_dark)
+        self.all_power_values_dict[f"{angle}"] = photodiode_power
 
         logging.info("Parrallel_execution => ok !")
 
@@ -558,9 +708,9 @@ class Measure(QObject):
 
             logging.error(f"Can't calculate mean({photodiode_power}), photodiode_power_mean is set to 1.")
 
-        logging.info(f"Measurement of {sample} at angle position {angle} ({true_power} mW) done.")
+        logging.info(f"Measurement of {sample} at angle position {angle} ({true_power*1000} mW) done.")
 
-        self.send_data_to_user.emit(f"Measurement of {sample} at angle position {angle} ({round(float(true_power), 5)} mW) done.\nCalculating and storing dark corrected intensity and power values.")
+        self.send_data_to_user.emit(f"Measurement of {sample} at angle position {angle} ({round(float(true_power*1000), 1)} mW) done.\nCalculating and storing dark corrected intensity and power values.")
         """Calculate and store dark corrected intensity and power values"""
         intensity_dark_corr = spectro_intensity
 
@@ -607,7 +757,7 @@ class Measure(QObject):
 
         try:
             fp=full_corrected_area/square_power_dark_corr
-            self.send_data_to_user.emit(f"P² = {round(square_power_dark_corr,1)}. \nF = {round(full_corrected_area,1)}. \nF/P² = {round(fp,1)}.")
+            self.send_data_to_user.emit(f"P² = {round(square_power_dark_corr,2)} mW². \nF = {round(full_corrected_area,1)} cps. \nF/P² = {round(fp,1)} cps/mW².")
 
             logging.info(f'F/P² = {fp}.')
 
@@ -667,9 +817,9 @@ class Measure(QObject):
                  }
             )
 
-        logging.info(f"self.experimental for {sample} at {wavelength} and {true_power} mW updated.")
+        logging.info(f"self.experimental for {sample} at {wavelength} and {true_power*1000} mW updated.")
 
-        self.send_data_to_user.emit(f"Experimental data of {sample} at {wavelength} nm and {round(float(true_power),5)} updated.")
+        self.send_data_to_user.emit(f"Experimental data of {sample} at {wavelength} nm and {round(float(true_power*1000),1)} updated.")
         list_of_fully_corrected_area.append(full_corrected_area)
         list_of_square_dark_corr_power.append(square_power_dark_corr)
 
@@ -990,11 +1140,9 @@ class MyApp(QWidget):
             self.ls_terminal_information_for_users_measurement.update()
 
         logging.info("Send data to user interface => ok !")
-
     """
     Calibration
     """
-
     def set_power_laser(self):
         value = self.dial_power.value()
         self.label_dial_power.setText(f"Required angle value= {value}°.")
@@ -1004,7 +1152,6 @@ class MyApp(QWidget):
         angle=tuner.RotationMount().get_angle()
         print(angle)
         self.label_dial_power.setText(f"Real angle value= {angle}°.")
-
     def all(self):
         """
         Send data and update data to PlotWidgets Spectre & Power
@@ -1013,20 +1160,6 @@ class MyApp(QWidget):
         self.update_graphs_power()
 
         logging.info("Spectre & Power plotwidgets updated => ok !")
-
-    def close_photodiode(self):
-        """
-        Close the photodiode
-        """
-        if SIMULATION_FOR_DEBUG == False:
-            with nidaqmx.Task() as task:
-                task.ai_channels.add_ai_voltage_chan("Dev1/ai1")
-                task.close()
-        else:
-            print("Close")
-
-        logging.info("Photodiode closed.")
-
     def get_ccd_corr_dye(self):
         """
         Collect and return data about the dye used for CCD correction
@@ -1102,7 +1235,6 @@ class MyApp(QWidget):
         self.lcd_intensity.display(self.intensity_int - self.background)
 
         logging.info("Calculation of the integral of intensity => ok !")
-
     def power_integration(self, y):
         """
         Send to the user using the lcd_power label the value of the power
@@ -1117,20 +1249,8 @@ class MyApp(QWidget):
         :return: float
         """
         if SIMULATION_FOR_DEBUG == False:
-            with nidaqmx.Task() as task:
-                task.ai_channels.add_ai_voltage_chan("Dev1/ai1", max_val=5, min_val=-5)
-                #data = task.read()
-                in_stream = task.in_stream
-
-                data = in_stream.read(number_of_samples_per_channel=self.integration_time_value)
-                print('1 Channel N Samples Read: ')
-                #data = task.read(number_of_samples_per_channel=10)
-                print(len(data), type(data))
-                print(data)
-                data=np.mean(data)
-                print(data)
-
-
+            data = Photodiode.read()
+            print(data)
         else:
             data = np.random.randint(10)
         return data
@@ -1145,7 +1265,6 @@ class MyApp(QWidget):
         self.ls_terminal_calibration.clear()
 
         logging.info("Power calibration interface reset by user.")
-
     def run(self, intensity_dark):
         """
         Read the spectro data and correct the intensity from the dark noise.
@@ -1287,7 +1406,6 @@ class MyApp(QWidget):
             self.progressbar_calibration.setValue(100)
             self.btn_experiment_status.setText("Safe")
             self.btn_experiment_status.setStyleSheet("background-color:green")
-            #self.close_photodiode() #remove if issues
             return True
     def run_loop_spectro(self):
         """
@@ -1324,7 +1442,6 @@ class MyApp(QWidget):
         self.ls_terminal_calibration.addItem("The dye selected is DMANs")
 
         logging.info("DMANS was selected as CCD dye.")
-
     def select_jod(self):
         """
         Makes the CCD correction dye = JOD
@@ -1333,7 +1450,6 @@ class MyApp(QWidget):
         self.ls_terminal_calibration.addItem("The dye selected is JOD")
 
         logging.info("JOD was selected as CCD dye.")
-
     def set_zero_intensity(self):
         """
         Set the background value of the power to 0.
@@ -1366,7 +1482,6 @@ class MyApp(QWidget):
         self.list_measuring_time.clear()
         self.btn_experiment_status.setText("Safe")
         self.btn_experiment_status.setStyleSheet("background-color:green")
-        #self.close_photodiode()
     def super_fast(self):
         """
         Turns self.faster to True to set integration time to 30 ms.
@@ -1395,7 +1510,6 @@ class MyApp(QWidget):
         self.graphs(x, y_corr)
 
         logging.info(f"updating Spectre, wavelength= {x}, Fluorescence= {y_corr}.")
-
     def wavelength_tuning(self):
         """
         Tune the laser to the desire wavelength
@@ -1411,12 +1525,9 @@ class MyApp(QWidget):
             logging.warning(f"The selected wavelength ({wavelength} nm) is not suitable for the laser.")
 
             return
-
     """
     Parameters
     """
-
-
     def add_sample(self):
         """
         Add a new sample to widget ls_list_of_samples
@@ -1437,7 +1548,6 @@ class MyApp(QWidget):
                 self.le_set_sample_name.setText("")
 
         logging.info("A new sample was added.")
-
     def concentration(self):
         """
         Check that the user send a valid concentration.
@@ -1469,7 +1579,6 @@ class MyApp(QWidget):
 
             logging.error("Concentration_Value ERROR.")
             return
-
     def create_sample(self):
         """
         Create a new sample using the data send by the user : name, concentration, solvent, root of emission spectrum
@@ -1571,7 +1680,6 @@ class MyApp(QWidget):
         self.sample_root = QFileDialog.getOpenFileName()
 
         logging.info(f"{self.sample_root[0]}.")
-
     def remove_sample(self):
         """
         Remove the selected sample in the ls_list_of_samples.
@@ -1585,7 +1693,6 @@ class MyApp(QWidget):
         self.refresh_data()
 
         logging.info(f"The sample {selected_item} was removed from sample list..")
-
     def select_fluorescein(self):
         """
         Select fluorescein as fluorescent dye for TPEF calculation
@@ -1604,6 +1711,8 @@ class MyApp(QWidget):
         """
         self.fluorescence_ref_dye = "NR"
         self.ls_terminal_parameters.addItem("The ref dye is nile red")
+        self.spb_set_wavelength_min.setMinimum(990)
+        self.spb_set_wavelength_max.setMinimum(990)
 
         logging.info("Nile Red was selected.")
 
@@ -1616,7 +1725,6 @@ class MyApp(QWidget):
         self.checklist["power"] = True
 
         logging.info("btn_check_power was checked.")
-
     def set_opo(self):
         """
         Allow to extend wavelength range to 1400 is user check the OPO checkbox
@@ -1658,7 +1766,6 @@ class MyApp(QWidget):
             for _ in self.user_info_parameters:
                 self.ls_terminal_parameters.addItem(_)
             self.user_info_parameters.clear()
-
     def show_solvent(self):
         """
         Set the entries in the spinbox solvent from dictionary self.solvents.
@@ -1667,7 +1774,6 @@ class MyApp(QWidget):
             lw_item = QListWidgetItem(self.solvents[key])
             lw_item.setData(0x0100, self.solvents[key])  # 0x0100 => QtCore.Qt.UserRole
             self.ls_solvent.addItem(lw_item)
-
     """
     Measurement _ Measure
     """
@@ -1681,7 +1787,6 @@ class MyApp(QWidget):
             save().write_only(dictionary_process= self.processed_data[key], sample= key)
 
             logging.info("Process data file was successfully created.")
-
     def disable_parameters_widgets(self):
         """
         Disable all key widgets to avoid user to manipulate data during measurements.
@@ -1971,7 +2076,6 @@ class MyApp(QWidget):
         if QMessageBox.StandardButton.Ok:
 
             logging.info(f"User as changed sample to {name}.")
-
     def pop_up_end_of_measure(self):
         """
         Message send to the user to say that the measurement of the sample at this wavelength is finished.
@@ -2118,7 +2222,6 @@ class MyApp(QWidget):
                                             }
                                 })
         save().create_samples_informations(data_to_save=data_to_save)
-
     """
     Measurement _  Processing data
     """
@@ -2179,7 +2282,7 @@ class MyApp(QWidget):
 
             self.processed_data.update({f"{sample}":sdp().read_process(sample= sample, simulation=False, root=self.folder_root)})
             sdp().copy_processed_data_for_simulation(sample, root=self.folder_root)
-    def graph_data(self, x, y, view, order_process, x_log, y_log, x_log2, y_log2):
+    def graph_data(self, x, y, view, order_process, x_log, y_log, x_log2, y_log2, simulation):
         """
         Plot data on view.
         :param x: array ou list
@@ -2203,10 +2306,15 @@ class MyApp(QWidget):
             self.FPSpectrum_2.clear()
             self.FPSpectrum_2.addLegend()
             self.FPSpectrum_2.setLabel('left', text= "log(Fluorescence intensity) / cps")
-            self.FPSpectrum_2.setLabel('bottom', text="log(P)")
+            if simulation :
+                self.FPSpectrum_2.setLabel('bottom', text="log(P²)")
+                self.FPSpectrum_2.setLabel('top', text=f"Order of the absorption = {order_process} (ref: 1).")
+            else:
+                self.FPSpectrum_2.setLabel('bottom', text="log(P)")
+                self.FPSpectrum_2.setLabel('top', text=f"Order of the absorption = {order_process} (ref: 2).")
             self.FPSpectrum_2.plot(x_log, y_log, pen= "k", symbol= "o", symbolPen="g",symbolBrush=0.5, show= True)
             self.FPSpectrum_2.plot(x_log2, y_log2, show=True)
-            self.FPSpectrum_2.setLabel('top', text=f"Order of the absorption = {order_process}")
+
     def plot_from_signal(self, x, y, square_power_dark_corr, full_corrected_area, i, power):
         """
         Plot all fluorescence spectrum vs laser power
@@ -2280,7 +2388,6 @@ class MyApp(QWidget):
         except:
 
             logging.warning("error in plot graph")
-
     def refresh_data(self):
         """
         Refresh send data
@@ -2293,7 +2400,6 @@ class MyApp(QWidget):
             self.ls_list_of_all_samples.addItem(lw_item)
 
             logging.info(f"sample: {sample}.")
-
     def refresh_wavelength(self, list_of_wavelength):
         """
         Refresh wavelength values in ls_done_wavelength
@@ -2308,7 +2414,6 @@ class MyApp(QWidget):
 
             logging.info("User refresh wavelength list.")
             logging.info(f"Wavelength= {wavelength}.")
-
     def read_data_from_folder(self):
         """
         Read data of samples from files samples.json and sample_data.json
@@ -2356,7 +2461,6 @@ class MyApp(QWidget):
         self.plot_s2_from_signal(simulation=False)
 
         logging.info("Data removed => ok !")
-
     def save_fluo_vs_power(self, i, temporary_wavelength_list, temporary_intensity_list, sample, wavelength):
         """
         Save fluorescence vs laser power as png file
@@ -2370,7 +2474,6 @@ class MyApp(QWidget):
                                          y=temporary_intensity_list, sample=sample, wavelength=wavelength, root=self.folder_root)
 
         logging.info("save_fluo_vs_power => ok !")
-
     def save_plot_from_signal(self, x, y, wavelength, sample):
         """
         Save dark noise as png file
@@ -2382,7 +2485,6 @@ class MyApp(QWidget):
         sdp().figure(x=x, y=y, name=f"Dark at {wavelength}", sample=sample, root=self.folder_root)
 
         logging.info("save_plot_from_signal => ok !")
-
     def save_quad_from_signal(self, square_power, fluo, fit, sample, wavelength):
         """
         save quadraticity check as png file.
@@ -2392,11 +2494,13 @@ class MyApp(QWidget):
         :param sample: str
         :param wavelength: int
         """
-        sdp().figure_quadraticity(x1=square_power, y1=fluo, x2=square_power, y2=fit,
-                                   sample=sample, wavelength=wavelength, root=self.folder_root)
+        try:
+            sdp().figure_quadraticity(x1=square_power, y1=fluo, x2=square_power, y2=fit,
+                                       sample=sample, wavelength=wavelength, root=self.folder_root)
 
-        logging.info("save_plot_from_signal => ok !")
-
+            logging.info("save_plot_from_signal => ok !")
+        except:
+            logging.warning("save_plot_from_signal => failed !")
     def select_sample(self):
         """
         Return selected sample as str
@@ -2522,7 +2626,7 @@ class MyApp(QWidget):
         try:
             x2, y2, value, order_process, x_log, y_log, x_log2, y_log2= sdp().fit_curve(x= np.array(list_pp), y=np.array(list_fl))
 
-            self.graph_data(x=list_pp, y=list_fl, order_process= order_process, view="quad", x_log=x_log, y_log=y_log, x_log2=x_log2, y_log2=y_log2)
+            self.graph_data(x=list_pp, y=list_fl, order_process= order_process, view="quad", x_log=x_log, y_log=y_log, x_log2=x_log2, y_log2=y_log2, simulation=simulation)
 
             logging.info("Fitting curve => ok !")
 
@@ -2549,7 +2653,6 @@ class MyApp(QWidget):
                             self.plot_from_signal(x= x, y=y, square_power_dark_corr="", full_corrected_area="", i= i, power= i)
                         except:
                             print("Error for plot")
-
     def show_data_to_user(self, data):
         """
         Communication between class Measure and user
@@ -2593,7 +2696,6 @@ class MyApp(QWidget):
         self.plot_s2_from_signal(simulation=True)
 
         logging.info("Simulation => ok !")
-
     def sort_wavelength(self, x, y):
         """
         Sort the data for to get a cleaner plot
@@ -2615,11 +2717,6 @@ class MyApp(QWidget):
         print(x_sort)
         y=np.array(y_temp)
         return x_sort, y
-
-
-
-
-
     def tpef_calculation_for_single_measure(self, sample, wavelength, simulation):
         """
         Caclulate the Sigma 2 value of the sample at selected wavelength
@@ -2742,16 +2839,12 @@ class MyApp(QWidget):
         })
 
         logging.info("Processed data dictionary Updated.")
-
-
-
     """
     Advanced Calibration
     """
     """def reset_power_angle_conversion_file(self):
         tuner.RotationMount().measure_power_angle_conversion()
         print("Reset of the conversion file finsihed")"""
-
     def select_filter_E650sp2p(self):
         """
         Select emission filter
@@ -2763,7 +2856,6 @@ class MyApp(QWidget):
         logging.info(f"User select {self.current_emission_filter}.")
 
         return True
-
     def select_filter_E750sp2p(self):
         """
         Select emission filter
@@ -2775,7 +2867,6 @@ class MyApp(QWidget):
         logging.info(f"User select {self.current_emission_filter}.")
 
         return True
-
     def select_filter_E650(self):
         """
         Select emission filter
@@ -2787,7 +2878,6 @@ class MyApp(QWidget):
         logging.info(f"User select {self.current_emission_filter}.")
 
         return True
-
     def select_filter_FES700(self):
         """
         Select emission filter
@@ -2799,7 +2889,6 @@ class MyApp(QWidget):
         logging.info(f"User select {self.current_emission_filter}.")
 
         return True
-
     def select_filter_FES750(self):
         """
         Select emission filter
@@ -2811,7 +2900,6 @@ class MyApp(QWidget):
         logging.info(f"User select {self.current_emission_filter}.")
 
         return True
-
     def select_filter_FES800(self):
         """
         Select emission filter
@@ -2823,7 +2911,6 @@ class MyApp(QWidget):
         logging.info(f"User select {self.current_emission_filter}.")
 
         return True
-
     def select_filter_FF01650(self):
         """
         Select emission filter
@@ -2836,7 +2923,6 @@ class MyApp(QWidget):
 
         return True
 
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyleSheet('''
@@ -2847,9 +2933,11 @@ if __name__ == "__main__":
 
     myApp = MyApp()
     myApp.show()
-    sys.exit(app.exec())
 
     try:
         sys.exit(app.exec())
     except SystemExit:
+        a=Photodiode.close()
+        fs_laser().closeShutterBlocking()
+        print(a)
         print('Closing Windows')

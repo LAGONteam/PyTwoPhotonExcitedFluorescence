@@ -27,7 +27,11 @@ def read():
     Returns the data measured by the power meter
     """
     a = tlpm.get_power()
-    return a
+    if str(a) == "nan" or str(a) == "inf":
+        return 0
+    else:
+        return a
+
 
 def close():
     tlpm.close()

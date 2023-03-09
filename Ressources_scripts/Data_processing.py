@@ -23,8 +23,12 @@ CUR_DIR = os.path.dirname(__file__)
 DATA = Path(f"{CUR_DIR}").parent
 DATA= DATA / "Datas"
 DATA.mkdir(exist_ok=True)
+root = DATA / "Metadata" / "sample_data.json"
 
 def get_samples(root):
+    """
+    Unused function
+    """
 
     logging.info("Data_proc:Starting get_samples.")
     logging.info(f"Data_proc:root: {root}.")
@@ -33,12 +37,10 @@ def get_samples(root):
     with open(root, "r") as f:
         sample_names = json.load(f)
         for _ in sample_names:
-            print(_)
-            samples.append(sample_data(_, root=root))
+            samples.append(sample_data(_))
+
         logging.info("Data_proc:get_samples => ok !")
-        print(root)
-        print(sample_names)
-        print(samples)
+
         return samples
 
 def get_all_samples():
@@ -120,9 +122,8 @@ class Temp_Files():
 
 class sample_data:
 
-    def __init__(self, sample_name, root):
-        root = Path(f"{root}").parent
-        self.root = root / "sample_data.json "
+    def __init__(self, sample_name):
+        self.root = root
         self.sample_name = sample_name
         with open(self.root, 'w') as f:
             json.dump([], f)
