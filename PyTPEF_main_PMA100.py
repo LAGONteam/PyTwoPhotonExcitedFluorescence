@@ -408,6 +408,7 @@ class Measure(QObject):
         logging.info("Starting measure step 1.")
 
         fs_laser().setWavelengthBlocking(int(self.wavelength))
+        Photodiode.set_wavelength(self.real_wavelength)
 
         logging.info(f"Laser tuned to {self.wavelength} nm => ok !")
 
@@ -1515,6 +1516,7 @@ class MyApp(QWidget):
         Tune the laser to the desire wavelength
         """
         wavelength = self.wavelength_tuning_value
+        Photodiode.set_wavelength(wavelength)
         if wavelength > 679 and wavelength < 1081:
             fs_laser().setWavelengthBlocking(int(wavelength))
 
