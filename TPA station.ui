@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1197</width>
+    <width>1196</width>
     <height>841</height>
    </rect>
   </property>
@@ -468,6 +468,29 @@
          <width>401</width>
          <height>301</height>
         </rect>
+       </property>
+      </widget>
+      <widget class="QLabel" name="lbl_busy">
+       <property name="geometry">
+        <rect>
+         <x>1050</x>
+         <y>430</y>
+         <width>41</width>
+         <height>17</height>
+        </rect>
+       </property>
+       <property name="font">
+        <font>
+         <pointsize>12</pointsize>
+         <weight>75</weight>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="autoFillBackground">
+        <bool>true</bool>
+       </property>
+       <property name="text">
+        <string>Busy</string>
        </property>
       </widget>
      </widget>

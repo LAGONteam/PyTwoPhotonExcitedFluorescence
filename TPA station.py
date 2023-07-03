@@ -1,4 +1,5 @@
 import sys
+import time
 from time import sleep
 import matplotlib
 import matplotlib.pyplot as plt
@@ -6,7 +7,7 @@ matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QWidget, QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QLineEdit
+from PyQt5.QtWidgets import QApplication, QWidget, QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QLineEdit, QAbstractItemView
 from PyQt5 import uic
 from PyQt5.QtGui import QPixmap
 import logging
@@ -87,11 +88,14 @@ class MyApp(QWidget):
         self.btn_remove_data.clicked.connect(self.remove_data)
         self.btn_refresh.clicked.connect(self.refresh_data)
         self.btn_set_sample_wavelength.clicked.connect(self.plot_s2_from_signal)
-        self.btn_show_sigma_2.clicked.connect(self.plot_s2_from_signal)
+        self.btn_show_sigma_2.clicked.connect(self.recalculate_sigma_two)
         self.btn_simulation.clicked.connect(self.simulation)
         self.btn_figure_2p_vs_1p.clicked.connect(self.generate_figure_2p_vs_1p)
         self.btn_change_sample_data.clicked.connect(self.change_sample_data)
         self.btn_3d_plot.clicked.connect(self.plot_3d)
+        self.lbl_busy.setStyleSheet('QLabel {background-color: green;}')
+
+        self.ls_measure_data.setSelectionMode(QAbstractItemView.MultiSelection)
 
         logging.info("Main:Initialization => ok !")
 
@@ -285,8 +289,10 @@ class MyApp(QWidget):
 
         temp = QFileDialog.getExistingDirectory(caption='Please select the folder Datas')
         self.folder_root = Path(temp)
+
         self.sample_root = self.folder_root / "Metadata" / "samples.json"
-        self.sample_data_root = self.folder_root / "Metadata" /"sample_data.json"
+        self.sample_data_root = self.folder_root / "Metadata" / "sample_data.json"
+        print("self.folder_root:", self.sample_data_root)
 
         logging.info(f"Main:read_data_from_folder:self.folder_root: {self.folder_root}.")
         logging.info(f"Main:read_data_from_folder:self.sample_data_root: {self.sample_data_root}.")
@@ -359,13 +365,15 @@ class MyApp(QWidget):
 
         logging.info(f"Main:get_files:self.sample_info: {self.sample_info}.")
 
-        samples= get_samples(root= self.sample_root)
+        samples= get_samples(root_= self.sample_root)
+        print(self.folder_root)
+        print("**", samples)
 
         logging.info(f"Main:get_files:sample: {samples}.")
 
         self.list_of_sample_data ={}
         self.list_of_wavelength=[]
-        self.list_of_sample_data[samples[0]] = save().read_process(samples[0], simulation=False, root=self.folder_root)
+        self.list_of_sample_data[samples[0]] = save().read_process(samples[0], simulation=False, root_=self.folder_root)
         for wave in self.list_of_sample_data[samples[0]]:
             self.list_of_wavelength.append(int(wave))
 
@@ -384,7 +392,7 @@ class MyApp(QWidget):
 
             logging.info(f"Main:get_files:sample: {sample}.")
 
-            self.processed_data.update({f"{sample}":save().read_process(sample= sample, simulation=False, root=self.folder_root)})
+            self.processed_data.update({f"{sample}":save().read_process(sample= sample, simulation=False, root_=self.folder_root)})
             save().copy_processed_data_for_simulation(sample, root=self.folder_root)
         logging.info("Main:get_files => ok !")
 
@@ -395,7 +403,7 @@ class MyApp(QWidget):
         """
 
         logging.info("Main:Starting:simulation.")
-
+        self.lbl_busy.setStyleSheet('QLabel {background-color: red;}')
         list_of_measure_to_remove = []
         for selected_data in self.ls_measure_data.selectedItems():
             a = self.ls_measure_data.row(selected_data)
@@ -416,7 +424,7 @@ class MyApp(QWidget):
 
         self.tpef_calculation_for_single_measure(sample=sample, wavelength=wavelength, simulation=True)
         self.plot_s2_from_signal(simulation=True)
-
+        self.lbl_busy.setStyleSheet('QLabel {background-color: green;}')
         logging.info("Main:simulation => ok !")
 
     def graph_data(self, x, y,x2, y2, view, value, order_process, x_log, y_log, x_log2, y_log2):
@@ -484,7 +492,9 @@ class MyApp(QWidget):
         logging.info("Main:Starting:refresh_data.")
 
         self.ls_list_of_all_samples.clear()
+        print("get samples(self.samples_root", self.sample_root)
         samples = get_samples(self.sample_root)
+        print("sample=", samples)
         for sample in samples:
             lw_item = QListWidgetItem(sample.sample_name)
             lw_item.setData(0x0100, sample)  # 0x0100 => QtCore.Qt.UserRole
@@ -544,7 +554,24 @@ class MyApp(QWidget):
 
             return sample
 
-    def plot_s2_from_signal(self, simulation):
+    def recalculate_sigma_two(self):
+        self.lbl_busy.setStyleSheet('QLabel {background-color: red;}')
+        for selected_sample in self.ls_list_of_all_samples.selectedItems():
+            sample = selected_sample.data(0x0100)
+        wavelength_=[]
+        for wave in range(self.ls_done_wavelengths.count()):
+            data_= self.ls_done_wavelengths.item(wave)
+            wavelength_.append(data_.data(0x0100))
+
+        for wavelength in wavelength_:
+            try:
+                self.tpef_calculation_for_single_measure(sample=sample, wavelength=wavelength, simulation= False)
+            except FileNotFoundError:
+                logging.warning(f"Main:select_sample: cannot find {wavelength} nm file for {sample}.")
+        self.plot_s2_from_signal()
+        print("RECALCULATION FINISHED")
+        self.lbl_busy.setStyleSheet('QLabel {background-color: green;}')
+    def plot_s2_from_signal(self, simulation=False):
         """
         This function plots only data on S2Spectrum
         :param simulation: bool
@@ -556,7 +583,7 @@ class MyApp(QWidget):
         self.S2Spectrum.clear()
         self.show_data_of_sample(simulation=simulation)
         sample= self.select_sample()
-        data= save().read_process(sample= sample, simulation=simulation, root=self.folder_root)
+        data= save().read_process(sample= sample, simulation=simulation, root_=self.folder_root)
         sigma_2= []
         tpef_wavelength= []
         for wavelength in data:
@@ -836,11 +863,12 @@ class MyApp(QWidget):
 
         area, correlation_coeff, slope, coeff, log_square_fluo, log_square_power, fit = rdf()._Quad_Log(list_of_fully_corrected_area,
                                                                                list_of_square_dark_corr_power)
+        #area = mean of F/P² for the corresponding sample, wavelength
 
 
         logging.info(f"Main:tpef_calculation_for_single_measure:self.fluorescence_ref_dye: {self.fluorescence_ref_dye}, type(self.fluorescence_ref_dye): {type(self.fluorescence_ref_dye)}.")
         logging.info(f"Main:tpef_calculation_for_single_measure:sample: {sample}, type(sample): {sample}.")
-
+        print("////////// Calcul TPA //////////////////////////")
         sigma2_phi, sigma2 = rdf()._Calcul_TPA(sample_info=self.sample_info,
                                                processed_data=self.processed_data,
                                                sample_name=str(sample),
@@ -886,8 +914,12 @@ class MyApp(QWidget):
                 logging.info(f"Main:tpef_calculation_for_single_measure:data_for_sigma_2.keys(): {data_for_sigma_2.keys()}.")
                 logging.info(f"Main:tpef_calculation_for_single_measure:data_for_sigma_2.values: {data_for_sigma_2.values}.")
 
-                x.append(wavelength)
-                y.append(data_for_sigma_2[f"{wavelength}"]["S2F"])
+                try:
+                    y.append(data_for_sigma_2[f"{wavelength}"]["S2F"])
+                    x.append(wavelength)
+                except KeyError:
+                    logging.warning(f"Main:tpef_calculation_for_single_measure: {wavelength} nm doesn't exist for {sample}")
+            logging.warning(f"Main:tpef_calculation_for_single_measure: wavelength: sample: x:{x}, y:{y}")
             try :
 
                 save().figure(x=x, y=y, name=f"TPEF spectra of {sample}", sample=sample, root= self.folder_root)
@@ -921,7 +953,7 @@ class MyApp(QWidget):
         for i in list_of_measure_to_remove:
             save().remove_data(sample=sample, wavelength=wavelength, measure=i, simulation=False,root=self.folder_root)
         self.tpef_calculation_for_single_measure(sample=sample, wavelength=wavelength, simulation= False)
-        self.plot_s2_from_signal(simulation=True)
+        self.plot_s2_from_signal(simulation=False)
 
         logging.info("Main:remove_data => ok !")
 
@@ -960,7 +992,7 @@ class MyApp(QWidget):
                 file_root = self.folder_root / f"{sample}" / f"experimental_data {sample}_{wavelength}.json"
                 list_of_fl, list_of_pp = save()._get_quick_f_and_pp(sample=sample, wavelength=wavelength,
                                                                     root=self.folder_root, number_of_measure= self.power_pitch)
-                data = save().read_process(sample=sample, simulation=simulation, root=self.folder_root)
+                data = save().read_process(sample=sample, simulation=simulation, root_=self.folder_root)
 
                 slope= data[f"{wavelength}"]["quadraticity"]['slope']
                 coeff=data[f"{wavelength}"]["quadraticity"]['coeff']
