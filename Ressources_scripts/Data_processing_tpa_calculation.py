@@ -33,7 +33,7 @@ class Read_Data_File():
 
     def __init__(self):
         """Dictionaries"""
-        self.refractive_index_dic = {"Water": 1.333, "Toluene": 1.4961, "THF": 1.405, "Methanol": 1.3288, "DMSO": 1.477}
+        self.refractive_index_dic = {"Water": 1.333, "Toluene": 1.4961, "THF": 1.405, "Methanol": 1.3288, "DMSO": 1.477, "DCM": 1.424, "Ethanol":1.361, "DMF":1.429, "Acetonitrile": 1.344, "Acetone": 1.359, "1,2-Dichloroethane": 1.442, "CHCl3": 1.444, "Acetic acid": 1.327, "1,4-Dioxane": 1.422, "Cyclohexane": 1.427, "Heptane":1.394}
         self.spectrum_JOD_water = References_data.REF_JOD_WATER_FLUO
         self.spectrum_DMANs_toluen = References_data.REF_DMANS_TOLUEN_FLUO
         self.spectrum_fluo_fluorescein_water = References_data.REF_FLUORESCEIN_WATER_FLUO
@@ -78,10 +78,11 @@ class Read_Data_File():
             logging.info(f"RDF:type(sample_name): {type(sample_name)}, type(reference_name): {type(reference_name)}.")
         else:
             try:
-                ref_data= save().read_process(sample= reference_name, simulation=simulation, root=root)
+                ref_data= save().read_process(sample= reference_name, simulation=simulation, root_=root)
                 logging.info(f"RDF:Ref_data: {ref_data}.")
             except FileNotFoundError:
                 logging.error("RDF:File not Found. Please measure the reference before the sample !")
+                print("ERROR_1")
                 return -1, -1
 
         try:
@@ -90,7 +91,9 @@ class Read_Data_File():
             logging.info(f"RDF:processed_data[sample_name]: {processed_data[sample_name]}.")
             logging.info(f"RDF:processed_data[reference_name]: {processed_data[reference_name]}.")
         except KeyError:
+            print("ERROR_2")
             logging.warning("RDF:Key error")
+
         phi = float(sample_info[f"{sample_name}"]["phi"])
         sample_concentration = sample_info[f"{sample_name}"]['concentration']
         ref_concentration = sample_info[f"{reference_name}"]['concentration']
@@ -103,10 +106,11 @@ class Read_Data_File():
         elif reference_name == "NR":
             reference_sigma2 = self.spectrum_S2F_NR_DMSO
         try:
-            area = (processed_data[f"{sample_name}"][f"{wavelength}"]['full_corrected_area']) *(1/(ref_data[f"{wavelength}"]['full_corrected_area']))
+            area = (processed_data[f"{sample_name}"][f"{wavelength}"]['full_corrected_area'])/(ref_data[f"{wavelength}"]['full_corrected_area'])
             logging.info(f"RDF:area: {area}.")
         except KeyError:
             logging.warning("RDF:Key Error. Please measure the reference before the sample !")
+            print("ERROR_3")
             return -1, -1
         concentration = float(ref_concentration) / float(sample_concentration)
         refractive_index = reference_refractive_index / sample_refractive_index
@@ -120,6 +124,31 @@ class Read_Data_File():
         sigma2_phi = round(calcul_tpa, 1)
         sigma2 = round(calcul_s2, 1)
         logging.info("RDF:_Calcul_TPA => ok !")
+
+        area_ref= ref_data[f"{wavelength}"]['full_corrected_area']
+        area_sample=processed_data[f"{sample_name}"][f"{wavelength}"]['full_corrected_area']
+        s2_ref_=reference_sigma2[f"{wavelength}"]
+        print("/"*1000)
+        print(
+            "*"*1000,"\n",
+            "wavelength", wavelength,"\n",
+            "sample", sample_name,"\n",
+            "ref_area", area_ref,"\n",
+            "area_sample",area_sample,"\n",
+            "area", area,"\n",
+            "ref_conc", ref_concentration,"\n",
+            "ref_sample", sample_concentration,"\n",
+            "concentration", concentration,"\n",
+            "ref_index", reference_refractive_index,"\n",
+            "sample_index", sample_refractive_index,"\n",
+            "refractive index", refractive_index,"\n",
+            "calcul_1", calcul_1,"\n",
+            "s2_ref_", s2_ref_,"\n",
+            "calcul_tpa", calcul_tpa,"\n",
+            "calcul_s2", calcul_s2,"\n",
+            "*" * 1000
+            )
+
         return sigma2_phi, sigma2
 
     def reference_dye_info(self, ref_dye):
@@ -405,6 +434,18 @@ class Read_Data_File():
         area= round(reg_lin[0],1)
         correlation_coeff=round(reg_lin[2]*reg_lin[2],5)
 
+        temp_list=[]
+
+        for n in range(len(list_of_fully_corrected_area)):
+            print(n)
+            temp_area =list_of_fully_corrected_area[n]/list_of_square_dark_corr_power[n]
+            temp_list.append(temp_area)
+        print(temp_list)
+
+        area_bis = np.mean(temp_list)
+        print(area_bis)
+        print(area)
+
         fluo_log = []
         power_log = []
         for fluo in list_of_fully_corrected_area:
@@ -420,7 +461,8 @@ class Read_Data_File():
         coeff = pearson*pearson  # Here I recover r² of the fitting
         fit = intercept + slope*power_log
         logging.info("RDF:_Quad_Log => ok !")
-        return area, correlation_coeff, slope, coeff, fluo_log, power_log, fit
+
+        return area_bis, correlation_coeff, slope, coeff, fluo_log, power_log, fit
 
     def _Figure_Duo(self, x1, y1, x2, y2, name):
         """

@@ -25,19 +25,18 @@ DATA= DATA / "Datas"
 DATA.mkdir(exist_ok=True)
 root = DATA / "Metadata" / "sample_data.json"
 
-def get_samples(root):
-    """
-    Unused function
-    """
+def get_samples(root_):
 
     logging.info("Data_proc:Starting get_samples.")
-    logging.info(f"Data_proc:root: {root}.")
+    logging.info(f"Data_proc:root: {root_}.")
 
     samples = []
-    with open(root, "r") as f:
+    print(root_)
+    with open(root_, "r") as f:
         sample_names = json.load(f)
+        print("##", sample_names)
         for _ in sample_names:
-            samples.append(sample_data(_))
+            samples.append(sample_data(sample_name=_, root_=root))
 
         logging.info("Data_proc:get_samples => ok !")
 
@@ -122,11 +121,17 @@ class Temp_Files():
 
 class sample_data:
 
-    def __init__(self, sample_name):
-        self.root = root
+    def __init__(self, sample_name, root_=False):
+        if root:
+            self.root= root_
+        else:
+            self.root = root
         self.sample_name = sample_name
-        with open(self.root, 'w') as f:
-            json.dump([], f)
+        print("****", self.root)
+        print(self.sample_name)
+
+        # with open(self.root, 'w') as f:
+        #     json.dump([], f)
 
     def __str__(self):
         return self.sample_name
@@ -227,7 +232,8 @@ class save:
             root = root / f"{sample}" / f"experimental_data {sample}_{wavelength}.json"
         elif simulation == True:
             root = root / f"{sample}" / f"experimental_data {sample}_{wavelength}_temp.json"
-        with open(root, "r") as r:
+        print("rrot:", root)
+        with open(root, encoding='utf-8', errors='ignore', mode="r") as r:
             data = json.load(r)
 
         logging.info("Data_proc:_get_data_for_new_mesure => ok !")
@@ -741,7 +747,7 @@ class save:
 
         return root
 
-    def read_process(self, sample, simulation, root):
+    def read_process(self, sample, simulation, root_):
         """
         This function reads data from processed_data sample (temp).json file
         :param sample: str
@@ -753,16 +759,18 @@ class save:
         logging.info("Data_proc:Starting read_process.")
         logging.info(f"Data_proc:sample: {sample}.")
         logging.info(f"Data_proc:simulation: {simulation}.")
-        logging.info(f"Data_proc:root: {root}.")
+        logging.info(f"Data_proc:root: {root_}.")
 
         if simulation == False:
-            root = root / f"{sample}" / f"processed_data {sample}.json"
+            root_ = root_ / f"{sample}" / f"processed_data {sample}.json"
         elif simulation == True:
-            root = root / f"{sample}" / f"processed_data {sample}_temp.json"
-        with open(root, "r") as r:
+            root_ = root_ / f"{sample}" / f"processed_data {sample}_temp.json"
+        with open(root_, "r") as r:
             data = json.load(r)
 
         logging.info("Data_proc:read_process => ok !")
+        print(root_)
+        print(data)
 
         return data
 
