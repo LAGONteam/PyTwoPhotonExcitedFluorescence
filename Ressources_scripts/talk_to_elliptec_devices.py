@@ -9,11 +9,12 @@ import elliptec
 import os
 from pathlib import Path
 import json
-#from coherent_laser import Chameleon
+# from coherent_laser import Chameleon
 from Ressources_scripts.coherent_laser import Chameleon
 import logging
 from Ressources_scripts import Photodiode
-#import Photodiode
+from Ressources_scripts import thorlabs_KSC101_auteur_amsikking as shutter
+# import Photodiode
 
 logging.basicConfig(level=logging.INFO,
                     filename="PyTPEF.log",
@@ -27,7 +28,21 @@ print(DATA)
 root = Path(f"{CUR_DIR}").parent
 root = root / "Ressources" / "dict_power_angle_conversion.json"
 CONTROLLER= elliptec.Controller('COM4')
-ROTATION= elliptec.Rotator(CONTROLLER)
+
+UNPLUGED = False
+# UNPLUGED == True only if the elliptec board was unplug from the current
+if UNPLUGED:
+    input("Please connect linear stage on 4")
+    device_linear = elliptec.Motor(CONTROLLER)
+    device_linear.change_address("4")
+    input("Please connect rotation stage on 1 and do not disconnect linear stage")
+    device_rotation = elliptec.Motor(CONTROLLER)
+    device_rotation.change_address("1")
+    print("Adresses changed")
+LINEAR = elliptec.Linear(CONTROLLER, address="4")
+LINEAR.home()
+
+ROTATION= elliptec.Rotator(CONTROLLER, address="1")
 ROTATION.home()
 
 
@@ -40,8 +55,6 @@ ROTATION.home()
 # power_meter_USB=ThorlabsPM100(inst=inst)
 # power_meter_USB.configure.scalar.power
 # power_meter_USB.sense.correction.collect.zero.initiate
-
-
 
 #POWER_METER= PMA100.PMA100()
 #POWER_METER.Connect()
@@ -66,52 +79,57 @@ class power_angle_conversion:
 
         self.dict_power_angle_conversion.update({wavelength: {0: ""}})
         for angle in range(90):
-            if angle%2 == 0:
+            # if angle%2 == 0:
 
-                logging.info(f"Talk_elliptec:The angle is {angle}.")
+            logging.info(f"Talk_elliptec:The angle is {angle}.")
 
-                RotationMount().rotation.set_angle(angle)
-                time.sleep(0.2) #for power stabilization
+            RotationMount().spin_to_position(position=angle)
+            time.sleep(0.2) #for power stabilization
 
-                logging.info(f"Talk_elliptec:The real angle is: {RotationMount().get_angle()}.")
+            logging.info(f"Talk_elliptec:The real angle is: {RotationMount().get_angle()}.")
 
-                # power = power_meter_USB.read
-                power  = Photodiode.read()
+            # power = power_meter_USB.read
+            power = Photodiode.read()
+            print("wavelength: ", wavelength, "angle: ", angle, "power: ", power)
+            logging.info(f"Talk_elliptec:The corresponding power is {power} mW.")
 
-                logging.info(f"Talk_elliptec:The corresponding power is {power} mW.")
-
-                self.dict_power_angle_conversion[wavelength].update({angle: power})
+            self.dict_power_angle_conversion[wavelength].update({angle: power})
 
         logging.info("power_angle_conversion => ok !")
 
-    def measure_power_angle_conversion(self):
+    def measure_power_angle_conversion(self, step):
         """
         This function measures and saves the power of the laser for all wavelengths and all half-wave plate angle.
         :return: None
         """
 
         logging.info("Talk_elliptec:Starting measure_power_angle_conversion.")
+        Chameleon().openShutterBlocking()
+        shutter.Controller().set_state('open')
 
-        for wavelength in range(680, 1081, 1):
-            # power_meter_USB.sense.correction.wavelength=int(wavelength)
-            Photodiode.set_wavelength(wavelength)
+        for wavelength in range(680, 1081, step):
+            try:
+                # power_meter_USB.sense.correction.wavelength=int(wavelength)
+                Photodiode.set_wavelength(wavelength)
 
-            logging.info(f"Talk_elliptec:The wavelength is {wavelength} nm.")
+                logging.info(f"Talk_elliptec:The wavelength is {wavelength} nm.")
 
-            Chameleon().setWavelengthBlocking(wavelength)
+                Chameleon().setWavelengthBlocking(wavelength)
 
-            logging.info(f"Talk_elliptec:Laser move to {wavelength} => ok !")
+                logging.info(f"Talk_elliptec:Laser move to {wavelength} => ok !")
 
-            Chameleon().openShutterBlocking()
+                logging.info("Talk_elliptec:Laser shutter is open !")
 
-            logging.info("Talk_elliptec:Laser shutter is open !")
+                self.power_angle_conversion(wavelength)
 
-            time.sleep(10)
-            self.power_angle_conversion(wavelength)
-            Chameleon().closeShutterBlocking()
+                logging.info("Talk_elliptec:Laser shutter is close.")
+            except:
+                pass
 
-            logging.info("Talk_elliptec:Laser shutter is close.")
-
+        shutter.Controller().set_state('closed')
+        Chameleon().closeShutterBlocking()
+        Chameleon().setWavelengthBlocking(800)
+        Photodiode.close()
         time.sleep(0.1)
         with open(root, "w") as g:
             json.dump(self.dict_power_angle_conversion, g)
@@ -161,7 +179,55 @@ class power_angle_conversion:
         with open(root, "w") as w:
             json.dump(dict, w)
 
+class Linear_stage:
 
+    def __init__(self):
+        pass
+
+    def pumping_opo(self, mirror_out_of_opo_path=False):
+        if mirror_out_of_opo_path:
+            print("Opo position")
+            LINEAR.set_distance(59)
+        else:
+            LINEAR.home()
+            print("No opo position")
+        time.sleep(5)
+
+    def check_linear_position(self):
+        opo_position = LINEAR.get_distance()
+        # if round(opo_position) == 60:
+        #     return False
+        # else:
+        #     return True
+        return opo_position
+
+class Optical_Shutter:
+
+    def __init__(self):
+        pass
+
+    def open(self):
+        shutter.Controller().set_state('open')
+        return
+    def close(self):
+        shutter.Controller().set_state('closed')
+        return
+
+class Power_detector:
+
+    def __init__(self):
+        pass
+
+    def read(self):
+        return Photodiode.read()
+
+    def change_wavelength(self, wavelength):
+        Photodiode.set_wavelength(wavelength)
+        return
+
+    def close(self):
+        Photodiode.close()
+        return
 
 class RotationMount:
 
@@ -173,13 +239,6 @@ class RotationMount:
     """
 
     def __init__(self):
-        self.controller= CONTROLLER
-        self.rotation= ROTATION
-        """self.controller = elliptec.Controller('COM4')
-        self.rotation=elliptec.Rotator(self.controller)
-        info = self.rotation.get('info')
-        self.rotation.home()"""
-        time.sleep(1)
         self.dico_power = {}
         self.min = False
         self.max = False
@@ -197,7 +256,7 @@ class RotationMount:
 
         logging.info("Talk_elliptec:Starting get_angle.")
 
-        angle = elliptec.rotator.Rotator(controller=CONTROLLER).get_angle()
+        angle = ROTATION.get_angle()
 
         logging.info(f"Talk_elliptec:angle: {angle}.")
         logging.info("Talk_elliptec:get_angle => ok !")
@@ -249,7 +308,7 @@ class RotationMount:
 
         '''measure the power at each angle (0-180) to get the closest angle values for min and max power to reach'''
         """for angle in range(90):
-            self.rotation.set_angle(angle)
+            ROTATION.set_angle(angle)
             time.sleep(0.1)
             m =self.read_power_meter()*1000 #1000 is due to user input in mW while PM100A deal with W"""
         angle_power_measurement = self.read_power_angle_conversion(wavelength)
@@ -282,7 +341,9 @@ class RotationMount:
         if self.max == True and self.min == True:
 
             logging.info("Talk_elliptec:determine_angle_for_power => ok !")
-
+            print(self.dico_power)
+            print(self.angle_min)
+            print(self.angle_max)
             return self.angle_min, self.angle_max, self.dico_power
 
     def max_angle(self):
@@ -329,7 +390,7 @@ class RotationMount:
         logging.info("Talk_elliptec:Starting spin_to_position.")
         logging.info(f"Talk_elliptec:position: {position}.")
 
-        self.rotation.set_angle(int(position))
+        ROTATION.set_angle(int(position))
 
         logging.info("Talk_elliptec:spin_to_position => ok !")
 
@@ -437,7 +498,7 @@ class RotationMount:
 
             logging.info(f"Talk_elliptec:The angle is {angle}.")
 
-            self.rotation.set_angle(angle)
+            ROTATION.set_angle(angle)
             time.sleep(4)  # for power stabilization
             power = self.read_power_meter() * 1000
             self.p.Clear()
@@ -448,7 +509,7 @@ class RotationMount:
 
         logging.info("Talk_elliptec:power_angle_conversion => ok !")
 
-    def measure_power_angle_conversion(self):
+    def measure_power_angle_conversion(self, step):
         """
         Unused function
         """
@@ -461,7 +522,7 @@ class RotationMount:
 
         logging.info("Talk_elliptec:Laser shutter is open !")
 
-        for wavelength in range(680, 1081, 5):
+        for wavelength in range(680, 1081, step):
 
             logging.info(f"Talk_elliptec:The wavelength is {wavelength} nm.")
 
@@ -498,10 +559,30 @@ class RotationMount:
 
         return data
 
+    def shut_down(self):
+        CONTROLLER.close()
+        logging.info("Talk_elliptec: Connection is now close.")
 
 if __name__ == '__main__':
+    # a = RotationMount()
+    # a.spin_to_position(90)
+    # print(a.get_angle())
+    #
+    # a.spin_to_position(45)
+    # print(a.get_angle())
+    # a.spin_to_position(10)
+    # print(a.get_angle())
 
-    m = power_angle_conversion()
-    m.measure_power_angle_conversion()
+    a = Linear_stage()
+    for iterations in range(2):
+        a.pumping_opo(True)
+        b = a.check_linear_position()
+        print(b)
+        a.pumping_opo(False)
+        b = a.check_linear_position()
+        print(b)
+    #
+    # m = power_angle_conversion()
+    # m.measure_power_angle_conversion(step=1)
 
 
